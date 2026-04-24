@@ -94,12 +94,43 @@ def run(args: argparse.Namespace) -> int:
 
     # ── LLM ──
     if result.llm:
-        console.print("\n  [bold]LLM Verdict[/]")
-        if hasattr(result.llm, "verdict"):
-            color = "red" if "phish" in str(result.llm.verdict).lower() else "green"
-            console.print(f"    [{color} bold]{result.llm.verdict}[/]")
-        if hasattr(result.llm, "reasoning"):
-            console.print(f"    [dim]{result.llm.reasoning}[/]")
+        llm = result.llm
+        console.print("\n  [bold]LLM Analysis[/]")
+
+        # Verdict
+        verdict = getattr(llm, "llm_verdict", None) or getattr(llm, "verdict", None)
+        if verdict:
+            vcolor = {"phishing": "red", "suspicious": "yellow", "legitimate": "green"}.get(
+                str(verdict).lower(), "white"
+            )
+            confidence = getattr(llm, "llm_confidence", "") or getattr(llm, "analysis_confidence", "")
+            console.print(f"    Verdict: [{vcolor} bold]{verdict}[/] ({confidence})")
+
+        # Attack classification
+        attack = getattr(llm, "attack_classification", None)
+        if attack:
+            atype = getattr(attack, "attack_type", None)
+            aconf = getattr(attack, "confidence", None)
+            if atype:
+                print_key_value("Attack type", f"{atype} ({aconf:.0%})" if aconf else atype)
+
+        # Model
+        model_name = getattr(llm, "model", None)
+        if model_name:
+            print_key_value("Model", model_name)
+
+        # Analyst narrative
+        narrative = getattr(llm, "analyst_narrative", None)
+        if narrative:
+            console.print(f"\n  [bold]Analyst Narrative[/]")
+            console.print(f"  [dim]{narrative}[/]")
+
+        # Suggestions
+        suggestions = getattr(llm, "analyst_suggestions", None)
+        if suggestions:
+            console.print(f"\n  [bold]Suggestions[/]")
+            for s in suggestions:
+                console.print(f"    - {s}")
 
     # ── Risk ──
     if result.scan and result.scan.risk:
