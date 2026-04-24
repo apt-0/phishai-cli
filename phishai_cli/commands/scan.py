@@ -6,9 +6,7 @@ import argparse
 
 from phishai_cli.output import (
     console,
-    print_error,
     print_header,
-    print_indicators,
     print_key_value,
     print_risk_score,
     read_eml_file,
@@ -31,14 +29,17 @@ def run(args: argparse.Namespace) -> int:
     if result.parsed:
         p = result.parsed
         console.print("\n  [bold]Email Summary[/]")
-        print_key_value("From", p.sender or "unknown")
-        print_key_value("To", ", ".join(p.recipients) if p.recipients else "unknown")
+        print_key_value("From", f"{p.from_display or ''} <{p.from_address or 'unknown'}>")
+        print_key_value("To", p.to_address or "unknown")
         print_key_value("Subject", p.subject or "(no subject)")
         print_key_value("Date", p.date or "unknown")
-        if p.auth:
-            print_key_value("SPF", p.auth.spf_result or "none")
-            print_key_value("DKIM", p.auth.dkim_result or "none")
-            print_key_value("DMARC", p.auth.dmarc_result or "none")
+
+        # Auth results
+        if p.auth_results:
+            console.print("\n  [bold]Authentication[/]")
+            for auth in p.auth_results:
+                color = "green" if auth.result == "pass" else "red"
+                console.print(f"    [{color}]{auth.method.upper()}:[/] {auth.result}")
 
     # ── Red flags ──
     if result.red_flags:
@@ -63,19 +64,38 @@ def run(args: argparse.Namespace) -> int:
     # ── NLP signals ──
     if result.nlp_signals:
         nlp = result.nlp_signals
-        console.print(f"\n  [bold]NLP Signals[/]")
-        if hasattr(nlp, "phishing_score"):
-            print_key_value("Phishing score", f"{nlp.phishing_score:.2f}")
-        if hasattr(nlp, "urgency_score"):
-            print_key_value("Urgency score", f"{nlp.urgency_score:.2f}")
-        if hasattr(nlp, "sentiment_label"):
-            print_key_value("Sentiment", nlp.sentiment_label)
+        nlp_data = nlp.model_dump() if hasattr(nlp, "model_dump") else {}
+        # Show only signals above threshold
+        active = {k: v for k, v in nlp_data.items() if isinstance(v, (int, float)) and v >= 0.3}
+        if active:
+            console.print(f"\n  [bold]NLP Signals[/]")
+            for signal, score in sorted(active.items(), key=lambda x: -x[1]):
+                bar_len = int(score * 20)
+                color = "red" if score >= 0.7 else "yellow" if score >= 0.4 else "cyan"
+                bar = f"[{color}]{'#' * bar_len}{'.' * (20 - bar_len)}[/]"
+                console.print(f"    {signal:<28} {bar} {score:.2f}")
 
     # ── Risk ──
     if result.risk:
-        print_risk_score(result.risk.score)
-        print_indicators(
-            result.risk.indicators if hasattr(result.risk, "indicators") else []
-        )
+        print_risk_score(result.risk.risk_score, label=f"Risk Score ({result.risk.risk_level})")
+
+        if result.risk.triggered_rules:
+            console.print(f"  [bold]Triggered Rules[/]")
+            for rule in result.risk.triggered_rules:
+                weight = rule.get("weight", 0) if isinstance(rule, dict) else getattr(rule, "weight", 0)
+                desc = rule.get("description", "") if isinstance(rule, dict) else getattr(rule, "description", "")
+                evidence = rule.get("evidence", "") if isinstance(rule, dict) else getattr(rule, "evidence", "")
+                color = "red" if weight > 0 else "green"
+                sign = "+" if weight > 0 else ""
+                console.print(f"    [{color}]{sign}{weight:.2f}[/] {desc}")
+                if evidence:
+                    console.print(f"         [dim]{evidence}[/]")
+
+        if result.risk.score_breakdown:
+            breakdown = result.risk.score_breakdown
+            bd = breakdown if isinstance(breakdown, dict) else (breakdown.model_dump() if hasattr(breakdown, "model_dump") else {})
+            parts = [f"{k}: {v:.3f}" for k, v in bd.items() if v]
+            if parts:
+                console.print(f"\n  [dim]Breakdown: {' | '.join(parts)}[/]")
 
     return 0

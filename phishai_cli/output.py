@@ -38,7 +38,7 @@ def print_risk_score(score: float, label: str = "Risk Score") -> None:
         level = "SAFE"
 
     bar_len = int(score * 30)
-    bar = f"[{color}]{'█' * bar_len}{'░' * (30 - bar_len)}[/]"
+    bar = f"[{color}]{'#' * bar_len}{'.' * (30 - bar_len)}[/]"
 
     console.print(f"\n  {label}: [{color} bold]{score:.0%} {level}[/]")
     console.print(f"  {bar}\n")

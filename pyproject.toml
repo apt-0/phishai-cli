@@ -22,13 +22,13 @@ classifiers = [
 ]
 
 dependencies = [
-    "phishai>=0.1.0",
+    "phishai-engine>=0.1.0",
     "rich>=13.0",
 ]
 
 [project.optional-dependencies]
 agent = [
-    "phishai[all]",
+    "phishai-engine[all]",
 ]
 dev = [
     "ruff",

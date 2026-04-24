@@ -9,7 +9,6 @@ from phishai_cli.output import (
     make_table,
     print_error,
     print_header,
-    print_indicators,
     print_key_value,
     print_risk_score,
     read_eml_file,
@@ -42,8 +41,15 @@ def run(args: argparse.Namespace) -> int:
     if result.scan and result.scan.parsed:
         p = result.scan.parsed
         console.print("\n  [bold]Email Summary[/]")
-        print_key_value("From", p.sender or "unknown")
+        print_key_value("From", f"{p.from_display or ''} <{p.from_address or 'unknown'}>")
+        print_key_value("To", p.to_address or "unknown")
         print_key_value("Subject", p.subject or "(no subject)")
+
+        if p.auth_results:
+            auth_summary = ", ".join(
+                f"{a.method.upper()}={a.result}" for a in p.auth_results
+            )
+            print_key_value("Auth", auth_summary)
 
     if result.scan and result.scan.red_flags:
         console.print(f"\n  [bold red]Red Flags ({len(result.scan.red_flags)})[/]")
@@ -59,15 +65,18 @@ def run(args: argparse.Namespace) -> int:
             parts = key.split(":")
             ioc = parts[1] if len(parts) > 1 else key
             svc = parts[2] if len(parts) > 2 else "?"
-            status = "found" if val else "empty"
-            table.add_row(ioc, svc, status)
+            found = val.found if hasattr(val, "found") else bool(val)
+            status_color = "green" if found else "dim"
+            status_text = "found" if found else "empty"
+            table.add_row(ioc, svc, f"[{status_color}]{status_text}[/]")
         console.print(table)
 
     # ── ML ──
     if result.ml:
         console.print("\n  [bold]ML Classification[/]")
         if hasattr(result.ml, "label"):
-            print_key_value("Label", result.ml.label)
+            color = "red" if "phish" in str(result.ml.label).lower() else "green"
+            console.print(f"    Label: [{color} bold]{result.ml.label}[/]")
         if hasattr(result.ml, "confidence"):
             print_key_value("Confidence", f"{result.ml.confidence:.2%}")
 
@@ -82,9 +91,16 @@ def run(args: argparse.Namespace) -> int:
 
     # ── Risk ──
     if result.scan and result.scan.risk:
-        print_risk_score(result.scan.risk.score)
-        print_indicators(
-            result.scan.risk.indicators if hasattr(result.scan.risk, "indicators") else []
-        )
+        risk = result.scan.risk
+        print_risk_score(risk.risk_score, label=f"Risk Score ({risk.risk_level})")
+
+        if risk.triggered_rules:
+            console.print(f"  [bold]Triggered Rules[/]")
+            for rule in risk.triggered_rules:
+                weight = rule.get("weight", 0) if isinstance(rule, dict) else getattr(rule, "weight", 0)
+                desc = rule.get("description", "") if isinstance(rule, dict) else getattr(rule, "description", "")
+                color = "red" if weight > 0 else "green"
+                sign = "+" if weight > 0 else ""
+                console.print(f"    [{color}]{sign}{weight:.2f}[/] {desc}")
 
     return 0
