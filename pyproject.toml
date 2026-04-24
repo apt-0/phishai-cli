@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "phishai-cli"
+version = "0.1.0"
+description = "PhishAI CLI — AI-powered phishing analysis agent for the terminal"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "apt-0" },
+]
+keywords = ["phishing", "email", "security", "ai", "agent", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Information Technology",
+    "Topic :: Security",
+    "Programming Language :: Python :: 3",
+]
+
+dependencies = [
+    "phishai>=0.1.0",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+agent = [
+    "phishai[all]",
+]
+dev = [
+    "ruff",
+    "pytest",
+]
+
+[project.scripts]
+phishai = "phishai_cli.__main__:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
