@@ -31,17 +31,38 @@ def _build_parser() -> argparse.ArgumentParser:
     p_analyze.add_argument("--services", nargs="*", default=["whois", "dns"],
                            help="Enrichment services (default: whois dns)")
     p_analyze.add_argument("--vt-key", default="", help="VirusTotal API key")
-    p_analyze.add_argument("--llm-model", default="", help="Path to GGUF model file")
     p_analyze.add_argument("--llm-mode", default="quick", choices=["quick", "deep"],
                            help="LLM analysis depth (default: quick)")
+
+    # LLM provider: local GGUF or remote
+    p_analyze.add_argument("--llm-model", default="", help="Path to local GGUF model file")
+    llm_group = p_analyze.add_mutually_exclusive_group()
+    llm_group.add_argument("--ollama", metavar="MODEL",
+                           help="Use Ollama for LLM (e.g. --ollama qwen3.5:4b)")
+    llm_group.add_argument("--lmstudio", metavar="MODEL",
+                           help="Use LM Studio for LLM (e.g. --lmstudio qwen3.5)")
+    llm_group.add_argument("--openai", metavar="MODEL",
+                           help="Use OpenAI for LLM (e.g. --openai gpt-4o-mini)")
+    llm_group.add_argument("--openrouter", metavar="MODEL",
+                           help="Use OpenRouter for LLM (e.g. --openrouter meta-llama/llama-3-8b-instruct)")
+    p_analyze.add_argument("--api-key", default="", help="API key (for openai/openrouter)")
 
     # ── url (analyze_url) ──────────────────────────────────────────
     p_url = sub.add_parser("url", help="Analyze a URL for phishing indicators")
     p_url.add_argument("target_url", help="URL to analyze")
-    p_url.add_argument("--vision-provider", default="", help="Vision LLM provider type")
-    p_url.add_argument("--vision-model", default="", help="Vision model name")
-    p_url.add_argument("--vision-url", default="", help="Vision API base URL")
     p_url.add_argument("--timeout", type=int, default=20, help="Navigation timeout (seconds)")
+
+    # Vision AI provider
+    vision_group = p_url.add_mutually_exclusive_group()
+    vision_group.add_argument("--ollama", metavar="MODEL",
+                              help="Use Ollama for AI Vision (e.g. --ollama llava)")
+    vision_group.add_argument("--lmstudio", metavar="MODEL",
+                              help="Use LM Studio for AI Vision")
+    vision_group.add_argument("--openai", metavar="MODEL",
+                              help="Use OpenAI for AI Vision (e.g. --openai gpt-4o)")
+    vision_group.add_argument("--openrouter", metavar="MODEL",
+                              help="Use OpenRouter for AI Vision")
+    p_url.add_argument("--api-key", default="", help="API key (for openai/openrouter)")
 
     # ── sender (verify_sender) ─────────────────────────────────────
     p_sender = sub.add_parser("sender", help="Verify a sender domain (WHOIS/DNS/BIMI)")
@@ -52,19 +73,34 @@ def _build_parser() -> argparse.ArgumentParser:
     p_report.add_argument("file", help="Path to .eml file")
     p_report.add_argument("-o", "--output", default="report.html",
                           help="Output file (default: report.html)")
-    p_report.add_argument("--llm-model", default="", help="Path to GGUF model file")
+    p_report.add_argument("--llm-model", default="", help="Path to local GGUF model file")
+    report_llm = p_report.add_mutually_exclusive_group()
+    report_llm.add_argument("--ollama", metavar="MODEL", help="Use Ollama for LLM")
+    report_llm.add_argument("--lmstudio", metavar="MODEL", help="Use LM Studio for LLM")
+    report_llm.add_argument("--openai", metavar="MODEL", help="Use OpenAI for LLM")
+    report_llm.add_argument("--openrouter", metavar="MODEL", help="Use OpenRouter for LLM")
+    p_report.add_argument("--api-key", default="", help="API key (for openai/openrouter)")
 
     # ── agent (AI agent mode) ──────────────────────────────────────
     p_agent = sub.add_parser("agent", help="AI agent — auto-selects tools based on input")
     p_agent.add_argument("input", nargs="?", default="",
                          help="Email file, URL, or natural language prompt")
-    p_agent.add_argument("--provider", default="ollama",
-                         help="LLM provider (ollama, openai, openrouter, lmstudio)")
-    p_agent.add_argument("--model", default="", help="Model name")
-    p_agent.add_argument("--base-url", default="", help="API base URL")
-    p_agent.add_argument("--api-key", default="", help="API key")
     p_agent.add_argument("--interactive", "-i", action="store_true",
                          help="Interactive chat mode")
+
+    # Provider shortcuts: --ollama model, --lmstudio model, --openai model, --openrouter model
+    provider_group = p_agent.add_mutually_exclusive_group()
+    provider_group.add_argument("--ollama", metavar="MODEL",
+                                help="Use Ollama (e.g. --ollama qwen3.5:4b)")
+    provider_group.add_argument("--lmstudio", metavar="MODEL",
+                                help="Use LM Studio (e.g. --lmstudio qwen3.5)")
+    provider_group.add_argument("--openai", metavar="MODEL",
+                                help="Use OpenAI (e.g. --openai gpt-4o)")
+    provider_group.add_argument("--openrouter", metavar="MODEL",
+                                help="Use OpenRouter (e.g. --openrouter meta-llama/llama-3-8b-instruct)")
+
+    p_agent.add_argument("--base-url", default="", help="Custom API base URL (overrides provider default)")
+    p_agent.add_argument("--api-key", default="", help="API key (required for openai/openrouter)")
 
     return parser
 

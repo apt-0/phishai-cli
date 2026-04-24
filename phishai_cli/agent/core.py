@@ -4,8 +4,9 @@ The agent receives user input (email file, URL, or natural language),
 decides which engine tools to call and in what order, then produces
 a final verdict in natural language.
 
-Uses OpenAI-compatible tool-calling API (works with Ollama, OpenAI,
-OpenRouter, LM Studio).
+Supports:
+  - Ollama (native /api/chat with tool-calling)
+  - OpenAI, OpenRouter, LM Studio (OpenAI-compatible /v1/chat/completions)
 """
 
 from __future__ import annotations
@@ -52,7 +53,21 @@ After gathering all evidence, provide a clear verdict:
 Be concise and actionable. Use bullet points for indicators.
 """
 
+# Ollama native tool format (different from OpenAI)
+OLLAMA_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": t["function"]["name"],
+            "description": t["function"]["description"],
+            "parameters": t["function"]["parameters"],
+        },
+    }
+    for t in TOOL_DEFINITIONS
+]
+
 MAX_TOOL_ROUNDS = 8
+TIMEOUT_SECONDS = 300  # 5 minutes for local models
 
 
 class Agent:
@@ -68,17 +83,18 @@ class Agent:
         from phishai.llm.provider import PROVIDER_PRESETS
 
         preset = PROVIDER_PRESETS.get(provider_type, PROVIDER_PRESETS.get("ollama", {}))
+        self.provider_type = provider_type
         self.base_url = base_url or preset.get("base_url", "")
         self.api_key = api_key
         self.model = model or preset.get("default_model", "")
+        self.is_ollama = provider_type == "ollama" or (
+            any(h in self.base_url for h in ("localhost", "127.0.0.1"))
+            and "/v1" in self.base_url
+        )
         self.messages: list[dict] = []
 
     def run(self, user_input: str) -> str:
-        """Process user input through the agent loop.
-
-        Returns a final natural-language response.
-        """
-        # Detect input type and enrich the prompt
+        """Process user input through the agent loop."""
         enriched = self._enrich_input(user_input)
 
         self.messages = [
@@ -87,58 +103,67 @@ class Agent:
         ]
 
         for _round in range(MAX_TOOL_ROUNDS):
-            response = self._chat_completion()
+            response = self._call_llm()
             if response is None:
                 return "Error: could not get a response from the LLM."
 
-            # Check if the model wants to call tools
             tool_calls = response.get("tool_calls") or []
             content = (response.get("content") or "").strip()
 
+            # Strip thinking tags from content
+            if content and "</think>" in content:
+                after = content.split("</think>")[-1].strip()
+                if after:
+                    content = after
+
             if not tool_calls:
-                # No more tool calls — this is the final answer
                 return content if content else "Analysis complete — no further findings."
 
-            # Execute each tool call
+            # Append assistant message with tool calls
             self.messages.append(response)
 
+            # Execute each tool call
             for tc in tool_calls:
                 fn = tc.get("function", {})
                 tool_name = fn.get("name", "")
-                try:
-                    tool_args = json.loads(fn.get("arguments", "{}"))
-                except json.JSONDecodeError:
-                    tool_args = {}
+                raw_args = fn.get("arguments", "{}")
+
+                # Arguments can be a string (JSON) or already a dict
+                if isinstance(raw_args, str):
+                    try:
+                        tool_args = json.loads(raw_args)
+                    except json.JSONDecodeError:
+                        tool_args = {}
+                else:
+                    tool_args = raw_args
 
                 logger.info("Agent calling tool: %s(%s)", tool_name, tool_args)
 
                 result_str = execute_tool(tool_name, tool_args)
 
-                # Truncate very large results to keep context manageable
+                # Truncate very large results
                 if len(result_str) > 8000:
                     result_str = result_str[:8000] + "\n... (truncated)"
 
                 self.messages.append({
                     "role": "tool",
-                    "tool_call_id": tc.get("id", ""),
                     "content": result_str,
                 })
 
-        # Exhausted rounds — ask for final verdict
+        # Exhausted rounds
         self.messages.append({
             "role": "user",
             "content": "Please provide your final verdict based on all the evidence collected.",
         })
-        response = self._chat_completion()
+        response = self._call_llm()
         if response:
             return (response.get("content") or "").strip()
         return "Agent could not produce a final verdict."
 
     def _enrich_input(self, user_input: str) -> str:
-        """Detect input type and add context to help the agent."""
+        """Detect input type and add context."""
         user_input = user_input.strip()
 
-        # File path — check if it's an .eml file
         expanded = os.path.expanduser(user_input)
         if os.path.isfile(expanded):
             return (
@@ -146,27 +171,82 @@ class Agent:
                 f"The file exists on disk. Use the appropriate tools to analyze it."
             )
 
-        # URL
         if re.match(r"https?://", user_input, re.IGNORECASE):
             return f"Analyze this URL for phishing indicators: {user_input}"
 
-        # Email address
         if "@" in user_input and "." in user_input.split("@")[-1]:
             return f"Verify this sender: {user_input}"
 
-        # Domain (no spaces, has a dot)
         if "." in user_input and " " not in user_input and "/" not in user_input:
             return f"Verify this domain: {user_input}"
 
-        # Natural language — pass through
         return user_input
 
-    def _chat_completion(self) -> dict | None:
-        """Call the LLM with tool definitions."""
-        if not self.base_url:
-            logger.error("No base_url configured for agent LLM")
+    def _call_llm(self) -> dict | None:
+        """Dispatch to Ollama native or OpenAI-compatible endpoint."""
+        if self.is_ollama:
+            return self._call_ollama_native()
+        return self._call_openai_compat()
+
+    def _call_ollama_native(self) -> dict | None:
+        """Call Ollama native /api/chat with tool-calling support."""
+        native_url = self.base_url.replace("/v1", "") + "/api/chat"
+
+        body = {
+            "model": self.model,
+            "messages": self.messages,
+            "tools": OLLAMA_TOOLS,
+            "stream": False,
+            "think": False,
+        }
+
+        logger.info("Ollama agent request: model=%s messages=%d", self.model, len(self.messages))
+
+        try:
+            req = urllib.request.Request(
+                native_url,
+                data=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+
+            msg = result.get("message", {})
+
+            # Normalize Ollama tool_calls format to OpenAI format
+            tool_calls = msg.get("tool_calls") or []
+            normalized_calls = []
+            for i, tc in enumerate(tool_calls):
+                fn = tc.get("function", {})
+                normalized_calls.append({
+                    "id": f"call_{i}",
+                    "type": "function",
+                    "function": {
+                        "name": fn.get("name", ""),
+                        "arguments": fn.get("arguments", {})
+                    },
+                })
+
+            return {
+                "role": "assistant",
+                "content": (msg.get("content") or "").strip(),
+                "tool_calls": normalized_calls if normalized_calls else None,
+            }
+        except urllib.error.HTTPError as e:
+            body_text = ""
+            try:
+                body_text = e.read().decode("utf-8")[:500]
+            except Exception:
+                pass
+            logger.error("Ollama agent HTTP %d: %s — %s", e.code, e.reason, body_text)
+            return None
+        except Exception as e:
+            logger.error("Ollama agent error: %s", e)
             return None
 
+    def _call_openai_compat(self) -> dict | None:
+        """Call OpenAI-compatible /v1/chat/completions."""
         url = f"{self.base_url.rstrip('/')}/chat/completions"
 
         headers = {"Content-Type": "application/json"}
@@ -182,6 +262,8 @@ class Agent:
         if self.model:
             body["model"] = self.model
 
+        logger.info("OpenAI-compat agent request: model=%s messages=%d", self.model, len(self.messages))
+
         try:
             req = urllib.request.Request(
                 url,
@@ -189,7 +271,7 @@ class Agent:
                 headers=headers,
                 method="POST",
             )
-            with urllib.request.urlopen(req, timeout=180) as resp:
+            with urllib.request.urlopen(req, timeout=TIMEOUT_SECONDS) as resp:
                 result = json.loads(resp.read().decode("utf-8"))
                 choices = result.get("choices", [])
                 if not choices:

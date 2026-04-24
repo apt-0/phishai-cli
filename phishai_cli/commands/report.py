@@ -18,6 +18,10 @@ def run(args: argparse.Namespace) -> int:
     if raw is None:
         return 1
 
+    from phishai_cli.providers import resolve_llm_provider
+
+    llm_provider = resolve_llm_provider(args)
+
     print_header("Report Generation")
 
     from phishai.tools.core import deep_analyze, generate_report
@@ -28,6 +32,7 @@ def run(args: argparse.Namespace) -> int:
             raw,
             services=["whois", "dns"],
             llm_model=args.llm_model or None,
+            llm_provider=llm_provider,
         )
 
     # We need an AnalysisResult for generate_report — reconstruct it

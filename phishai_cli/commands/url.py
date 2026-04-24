@@ -16,16 +16,13 @@ from phishai_cli.output import (
 
 
 def run(args: argparse.Namespace) -> int:
-    print_header("URL Analysis")
+    from phishai_cli.providers import resolve_llm_provider
 
-    vision_provider = None
-    if args.vision_provider:
-        from phishai.llm.provider import make_provider_config
-        vision_provider = make_provider_config(
-            provider_type=args.vision_provider,
-            base_url=args.vision_url,
-            model=args.vision_model,
-        )
+    vision_provider = resolve_llm_provider(args)
+
+    print_header("URL Analysis")
+    if vision_provider:
+        print_key_value("Vision", f"{vision_provider['type']} / {vision_provider['model']}")
 
     from phishai.tools.core import analyze_url
 

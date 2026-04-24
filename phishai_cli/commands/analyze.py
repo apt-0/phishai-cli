@@ -20,7 +20,18 @@ def run(args: argparse.Namespace) -> int:
     if raw is None:
         return 1
 
+    from phishai_cli.providers import resolve_llm_provider
+
+    llm_provider = resolve_llm_provider(args)
+    llm_label = ""
+    if llm_provider:
+        llm_label = f"{llm_provider['type']} / {llm_provider['model']}"
+    elif args.llm_model:
+        llm_label = f"local GGUF: {args.llm_model}"
+
     print_header("Deep Analysis")
+    if llm_label:
+        print_key_value("LLM", llm_label)
 
     api_keys = {}
     if args.vt_key:
@@ -34,6 +45,7 @@ def run(args: argparse.Namespace) -> int:
             services=args.services,
             api_keys=api_keys,
             llm_model=args.llm_model or None,
+            llm_provider=llm_provider,
             llm_mode=args.llm_mode,
         )
 
